@@ -29,7 +29,7 @@
     .tool-row{display:grid;grid-template-columns:1fr 46px 46px;gap:8px;margin-bottom:12px}.btn,.icon-btn{border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:12px;padding:10px 13px;font-weight:800}.btn:hover,.icon-btn:hover{border-color:var(--accent);color:var(--accent-strong)}
     .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn.primary:hover{background:var(--accent-strong);color:#fff}.btn.full{width:100%}.icon-btn{display:grid;place-items:center;width:44px;height:44px;min-width:44px;min-height:44px;flex:0 0 44px;padding:0;border-radius:12px;line-height:1}
     .cloud-state{display:flex;align-items:center;gap:8px;min-width:0}.cloud-dot{width:9px;height:9px;border-radius:50%;background:var(--line2)}.cloud-state.ok .cloud-dot{background:var(--good)}.cloud-state.busy .cloud-dot{background:var(--accent)}.cloud-state.warn .cloud-dot{background:var(--warn)}.cloud-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)}
-    .search-wrap{position:relative}.search-wrap input{width:100%;height:48px;border:1px solid var(--line);border-radius:12px;background:var(--paper);color:var(--ink);padding:10px 15px 10px 42px;font-size:15px;-webkit-appearance:none;appearance:none}.search-wrap:before{content:"⌕";position:absolute;left:13px;top:8px;font-size:23px;color:var(--muted)}
+    .search-wrap{position:relative}.search-wrap input{width:100%;height:48px;border:1px solid var(--line);border-radius:12px;background:var(--paper);color:var(--ink);padding:10px 15px 10px 42px;font-size:16px;-webkit-appearance:none;appearance:none}.search-wrap:before{content:"⌕";position:absolute;left:13px;top:8px;font-size:23px;color:var(--muted)}
     .filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}.filters select{width:100%;height:42px;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);padding:7px 9px;font-size:13px}.owned-row{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-top:11px;color:var(--muted);font-size:13px}.owned-row label{display:flex;align-items:center;gap:7px}.owned-row input{accent-color:var(--accent)}
     .add-agent{margin-top:13px;height:46px}
     .list-meta{display:flex;justify-content:space-between;padding:11px 20px 8px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.08em}.agent-list{flex:1;overflow:auto;padding:0 10px 18px;scrollbar-color:var(--line2) transparent}
@@ -127,8 +127,11 @@
       <div class="field full auth-logged-in" hidden><div class="cloud-account"><b id="cloudAccountEmail">로그인 사용자</b><span>현재 Supabase 사용자 ID를 그대로 사용합니다. 기존 캐릭터 데이터와 연결된 계정입니다.</span></div></div>
       <div class="field full auth-logged-in" hidden><label>현재 계정 비밀번호 설정 / 변경</label><div class="password-grid"><input id="cloudNewPassword" type="password" minlength="6" autocomplete="new-password" placeholder="새 비밀번호 · 6자 이상"><input id="cloudNewPasswordConfirm" type="password" minlength="6" autocomplete="new-password" placeholder="새 비밀번호 확인"><button class="btn" id="setCloudPassword" type="button">비밀번호 설정</button></div><div class="helper">기존 Magic Link 계정에서 이 기능을 사용하면 새 사용자를 만들지 않고 현재 계정에 비밀번호만 추가합니다.</div></div>
     </div>
+    <div class="form-sep" style="margin-top:20px">CSV 일괄 수정</div>
+    <div class="cloud-card"><strong>캐릭터 DB CSV</strong><p>현재 화면에 적용된 최신 DB를 CSV로 내보내고, 수정한 CSV를 다시 가져올 수 있습니다. <b>id 열은 수정하지 마세요.</b> 행 순서는 자유롭게 바꿔도 되며, 가져올 때 id를 기준으로 각 캐릭터에 반영합니다.</p><div class="cloud-actions"><button class="btn" id="exportCsv" type="button">CSV 내보내기</button><button class="btn" id="importCsv" type="button">CSV 가져오기</button></div></div>
     <div class="cloud-actions"><button class="btn" id="pullCloud" type="button">클라우드에서 불러오기</button><button class="btn" id="pushCloud" type="button">현재 데이터를 업로드</button><button class="btn" id="cloudSignOut" type="button">로그아웃</button><button class="btn primary" id="downloadDeploy" type="button">GitHub 배포용 HTML 만들기</button></div><p class="helper">배포용 HTML에는 Project URL과 Publishable key만 포함되고, 현재 수치·메모·비밀번호 같은 개인 데이터는 포함하지 않습니다.</p>
   </div></dialog>
+  <input id="csvFileInput" type="file" accept=".csv,text/csv" hidden>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script id="embedded-sync-config" type="application/json">{"url":"","key":""}</script>
@@ -243,6 +246,107 @@
     async function pullCloud({silent=false,force=false}={}){if(!cloudClient||!cloudUser||cloudBusy)return;cloudBusy=true;renderCloudDialog();try{const r=await fetchCloud();if(!r){cloudBusy=false;return pushCloud({silent})}const ct=Date.parse(r.updated_at||0),kt=Date.parse(syncMeta.lastCloudUpdatedAt||0);if(!force&&kt&&ct<=kt){if(!silent)toast("이미 최신 데이터입니다.");return}applyCloud(r,silent?"":"클라우드 데이터를 불러왔습니다.")}catch(e){console.warn(e);if(!silent)toast("클라우드 불러오기 실패: "+(e.message||e))}finally{cloudBusy=false;renderCloudDialog()}}
     async function initialCloudSync(){if(!cloudClient||!cloudUser||cloudBusy)return;cloudBusy=true;renderCloudDialog();try{const r=await fetchCloud();if(!r){cloudBusy=false;return pushCloud({silent:true})}const hasLocal=Boolean(localStorage.getItem(STORAGE_KEY));if(!syncMeta.initialized&&hasLocal){cloudBusy=false;const useCloud=confirm("이 기기의 기존 데이터와 클라우드 데이터가 모두 있습니다.\n\n확인: 클라우드 데이터를 사용\n취소: 이 기기의 데이터를 클라우드에 업로드");return useCloud?applyCloud(r,"클라우드 데이터를 적용했습니다."):pushCloud({silent:false})}cloudBusy=false;return pullCloud({silent:true})}catch(e){console.warn(e);cloudBusy=false;renderCloudDialog()}}
     async function signOutCloud(){if(!cloudClient)return;const {error}=await cloudClient.auth.signOut();if(error)return toast("로그아웃 실패: "+error.message);cloudUser=null;cloudAuthMode="login";renderCloudDialog();toast("로그아웃했습니다.")}
+    const CSV_HEADERS=["id","캐릭터명","영문명","별칭","등급","속성","특성","진영","출시버전","실장상태","보유","돌파","엔진재련","전용W엔진","대체W엔진_S급","대체W엔진_A급","추천4세트","추천2세트","4번디스크","5번디스크","6번디스크","부옵션우선순위","스킬우선순위","빌드설명","출처URL","스펙기준_JSON","현재수치_JSON","개인메모","이미지URL"];
+    const csvJoinList=v=>(Array.isArray(v)?v:[]).map(x=>String(x??"").trim()).filter(Boolean).join(" || ");
+    const csvJoinDiscs=v=>(Array.isArray(v)?v:[]).map(o=>`${String(o?.name||"").trim()} ${Number(o?.pieces)||""}세트 | ${String(o?.effect||"").trim()}`.trim()).filter(Boolean).join(" || ");
+    const csvEscape=v=>{const x=String(v??"");return /[",\r\n]/.test(x)?`"${x.replaceAll('"','""')}"`:x};
+    function agentToCsvRow(a){return [
+      a.id,a.name,a.en,csvJoinList(a.aliases),a.rank,a.attribute,a.specialty,a.faction,a.version,a.availability,
+      a.owned?"TRUE":"FALSE",a.mindscape,a.engineCopies,a.signatureEngine,csvJoinList(a.alt5Engines),csvJoinList(a.alt4Engines),
+      csvJoinDiscs(a.disc4Options),csvJoinDiscs(a.disc2Options),a.slot4,a.slot5,a.slot6,a.substats,a.skills,a.note,a.source,
+      JSON.stringify(a.cuts||[]),JSON.stringify(a.current||{}),a.memo,a.image
+    ]}
+    function exportCharacterCsv(){
+      const lines=[CSV_HEADERS,...db.agents.map(agentToCsvRow)].map(row=>row.map(csvEscape).join(","));
+      const blob=new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
+      const url=URL.createObjectURL(blob),a=document.createElement("a");
+      a.href=url;a.download=`zzz_character_db_${new Date().toISOString().slice(0,10)}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      toast(`${db.agents.length}명 캐릭터 DB를 CSV로 내보냈습니다.`)
+    }
+    function parseCsvText(text){
+      text=String(text||"").replace(/^\uFEFF/,"");
+      const rows=[];let row=[],cell="",quoted=false;
+      for(let i=0;i<text.length;i++){
+        const ch=text[i];
+        if(quoted){
+          if(ch==='"'&&text[i+1]==='"'){cell+='"';i++}
+          else if(ch==='"')quoted=false;
+          else cell+=ch;
+        }else{
+          if(ch==='"')quoted=true;
+          else if(ch===','){row.push(cell);cell=""}
+          else if(ch==='\n'){row.push(cell.replace(/\r$/,"") );rows.push(row);row=[];cell=""}
+          else cell+=ch;
+        }
+      }
+      if(quoted)throw new Error("닫히지 않은 큰따옴표가 있습니다.");
+      if(cell!==""||row.length){row.push(cell.replace(/\r$/,"") );rows.push(row)}
+      return rows.filter(r=>r.some(v=>String(v).trim()!==""));
+    }
+    const csvSplitMulti=v=>String(v??"").split(/\s*\|\|\s*|\r?\n/).map(x=>x.trim()).filter(Boolean);
+    function csvParseDiscs(v,pieces){return csvSplitMulti(v).map(part=>{const seg=part.split("|");const left=String(seg.shift()||"").trim();const name=left.replace(new RegExp(`\\s*${pieces}세트\\s*$`),"").trim();const effect=seg.join("|").trim()||DISK_EFFECTS[name]?.[String(pieces)]||"";return name?{name,pieces,effect}:null}).filter(Boolean)}
+    function csvBool(v,fallback=false){const x=String(v??"").trim().toLowerCase();if(!x)return Boolean(fallback);if(["true","1","yes","y","예","보유","o"].includes(x))return true;if(["false","0","no","n","아니오","미보유","x"].includes(x))return false;return Boolean(fallback)}
+    function csvNum(v,fallback=0,min=-Infinity,max=Infinity){const x=String(v??"").trim();if(!x)return Number(fallback)||0;const n=Number(x);return Number.isFinite(n)?Math.min(max,Math.max(min,n)):(Number(fallback)||0)}
+    function csvJson(v,fallback,label,rowNo,type){const x=String(v??"").trim();if(!x)return clone(fallback);try{const parsed=JSON.parse(x);if(type==="array"&&!Array.isArray(parsed))throw new Error("배열 형식이 아닙니다.");if(type==="object"&&(parsed===null||Array.isArray(parsed)||typeof parsed!=="object"))throw new Error("객체 형식이 아닙니다.");return parsed}catch(e){throw new Error(`${rowNo}행 ${label} 형식 오류: ${e.message}`)}}
+    async function importCharacterCsv(file){
+      if(!file)return;
+      const rows=parseCsvText(await file.text());
+      if(rows.length<2)throw new Error("가져올 캐릭터 데이터가 없습니다.");
+      const headers=rows[0].map(x=>String(x).trim());
+      const h=new Map(headers.map((x,i)=>[x,i]));
+      if(!h.has("id"))throw new Error("id 열이 없습니다. 내보낸 CSV 형식을 유지해 주세요.");
+      const existingById=new Map(db.agents.map(a=>[String(a.id),a]));
+      const updates=new Map(),seen=new Set();
+      const get=(r,name)=>h.has(name)?String(r[h.get(name)]??""):null;
+      const has=name=>h.has(name);
+      for(let ri=1;ri<rows.length;ri++){
+        const r=rows[ri],rowNo=ri+1,id=String(get(r,"id")||"").trim();
+        if(!id)throw new Error(`${rowNo}행의 id가 비어 있습니다.`);
+        if(seen.has(id))throw new Error(`${rowNo}행: id '${id}'가 중복되었습니다.`);seen.add(id);
+        const current=existingById.get(id);
+        if(!current&&!id.startsWith("custom-"))throw new Error(`${rowNo}행: 알 수 없는 id '${id}'입니다. id 열은 수정하지 마세요.`);
+        const base=current||{};
+        const raw={...clone(base),id};
+        if(has("캐릭터명"))raw.name=(get(r,"캐릭터명")||"").trim()||base.name||"";
+        if(has("영문명"))raw.en=(get(r,"영문명")||"").trim();
+        if(has("별칭"))raw.aliases=csvSplitMulti(get(r,"별칭"));
+        if(has("등급"))raw.rank=(get(r,"등급")||"").trim()||base.rank||"S";
+        if(has("속성"))raw.attribute=(get(r,"속성")||"").trim();
+        if(has("특성"))raw.specialty=(get(r,"특성")||"").trim();
+        if(has("진영"))raw.faction=(get(r,"진영")||"").trim();
+        if(has("출시버전"))raw.version=(get(r,"출시버전")||"").trim();
+        if(has("실장상태"))raw.availability=(get(r,"실장상태")||"").trim();
+        if(has("보유"))raw.owned=csvBool(get(r,"보유"),base.owned);
+        if(has("돌파"))raw.mindscape=csvNum(get(r,"돌파"),base.mindscape,0,6);
+        if(has("엔진재련"))raw.engineCopies=csvNum(get(r,"엔진재련"),base.engineCopies||1,1,5);
+        if(has("전용W엔진"))raw.signatureEngine=(get(r,"전용W엔진")||"").trim();
+        if(has("대체W엔진_S급"))raw.alt5Engines=csvSplitMulti(get(r,"대체W엔진_S급"));
+        if(has("대체W엔진_A급"))raw.alt4Engines=csvSplitMulti(get(r,"대체W엔진_A급"));
+        if(has("추천4세트"))raw.disc4Options=csvParseDiscs(get(r,"추천4세트"),4);
+        if(has("추천2세트"))raw.disc2Options=csvParseDiscs(get(r,"추천2세트"),2);
+        if(has("4번디스크"))raw.slot4=(get(r,"4번디스크")||"").trim();
+        if(has("5번디스크"))raw.slot5=(get(r,"5번디스크")||"").trim();
+        if(has("6번디스크"))raw.slot6=(get(r,"6번디스크")||"").trim();
+        if(has("부옵션우선순위"))raw.substats=(get(r,"부옵션우선순위")||"").trim();
+        if(has("스킬우선순위"))raw.skills=(get(r,"스킬우선순위")||"").trim();
+        if(has("빌드설명"))raw.note=get(r,"빌드설명")||"";
+        if(has("출처URL"))raw.source=(get(r,"출처URL")||"").trim();
+        if(has("스펙기준_JSON"))raw.cuts=csvJson(get(r,"스펙기준_JSON"),base.cuts||[],"스펙기준_JSON",rowNo,"array");
+        if(has("현재수치_JSON"))raw.current=csvJson(get(r,"현재수치_JSON"),base.current||{},"현재수치_JSON",rowNo,"object");
+        if(has("개인메모"))raw.memo=get(r,"개인메모")||"";
+        if(has("이미지URL"))raw.image=(get(r,"이미지URL")||"").trim();
+        if(!raw.name)throw new Error(`${rowNo}행의 캐릭터명이 비어 있습니다.`);
+        updates.set(id,normalizeAgent(raw,base,ri));
+      }
+      const newIds=[...updates.keys()].filter(id=>!existingById.has(id));
+      if(!confirm(`CSV에서 ${updates.size}명의 데이터를 읽었습니다.\n\n현재 DB에 반영할까요?${newIds.length?`\n새 사용자 캐릭터: ${newIds.length}명`:""}\n\nid를 기준으로 반영하므로 CSV 행 순서는 상관없습니다.`))return;
+      db.agents=db.agents.map(a=>updates.get(a.id)||a);
+      newIds.forEach(id=>db.agents.push(updates.get(id)));
+      db.updatedAt=new Date().toISOString().slice(0,10);
+      if(!db.agents.some(a=>a.id===state.selectedId))state.selectedId=db.agents[0]?.id;
+      saveLocal(`CSV에서 ${updates.size}명의 DB를 반영했습니다.`);renderFilterOptions();render();renderCloudDialog();
+    }
+
     function downloadDeployHtml(){if(!validSyncConfig()){toast("먼저 Supabase 연결 설정을 저장하세요.");return}const doc=document.documentElement.cloneNode(true);const cfg=doc.querySelector("#embedded-sync-config");if(cfg)cfg.textContent=JSON.stringify({url:syncConfig.url,key:syncConfig.key}).replaceAll("<","\\u003c");["#detailRoot","#agentList","#mobileAgentList"].forEach(sel=>{const n=doc.querySelector(sel);if(n)n.innerHTML=""});doc.querySelectorAll("input,textarea").forEach(n=>{n.removeAttribute("value");if(n.tagName==="TEXTAREA")n.textContent="";if(n.type==="checkbox")n.removeAttribute("checked")});doc.setAttribute("data-theme","light");const blob=new Blob(["<!doctype html>\n"+doc.outerHTML],{type:"text/html;charset=utf-8"});const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="index.html";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast("GitHub 배포용 index.html을 만들었습니다.")}
 
     function closeAgentListDialog(){const d=$("#listDialog");if(d?.open)d.close()}
@@ -256,7 +360,7 @@
     $("#attributeFilter").addEventListener("change",e=>{state.attribute=e.target.value;renderAgentList()});$("#specialtyFilter").addEventListener("change",e=>{state.specialty=e.target.value;renderAgentList()});$("#rankFilter").addEventListener("change",e=>{state.rank=e.target.value;renderAgentList()});$("#sortFilter").addEventListener("change",e=>{state.sort=e.target.value;renderAgentList()});$("#ownedOnly").addEventListener("change",e=>{state.ownedOnly=e.target.checked;renderAgentList()});
     $("#themeToggle").addEventListener("click",toggleTheme);$("#mobileTheme").addEventListener("click",toggleTheme);$("#cloudOpen").addEventListener("click",()=>{$("#cloudDialog").showModal();renderCloudDialog()});$("#mobileCloud").addEventListener("click",()=>{$("#cloudDialog").showModal();renderCloudDialog()});$("#mobileList").addEventListener("click",()=>{$("#mobileSearch").value=state.query;$("#listDialog").showModal()});
     $$('[data-close]').forEach(b=>b.addEventListener('click',()=>$('#'+b.dataset.close).close()));$("#addAgent").addEventListener("click",()=>openEditor());$("#closeEdit").addEventListener("click",()=>$("#editDialog").close());$("#cancelEdit").addEventListener("click",()=>$("#editDialog").close());$("#editForm").addEventListener("submit",e=>{e.preventDefault();if(saveEditor())$("#editDialog").close()});$("#addCut").addEventListener("click",()=>{syncCuts();state.editCuts.push({stat:"",unit:"",required:0,recommended:0});renderEditCuts()});$("#editCuts").addEventListener("click",e=>{const i=e.target.dataset.remove;if(i!==undefined){syncCuts();state.editCuts.splice(Number(i),1);renderEditCuts()}});$("#deleteCustom").addEventListener("click",deleteCustom);
-    $("#saveCloudConfig").addEventListener("click",saveCloudConfig);$("#authTabLogin").addEventListener("click",()=>setCloudAuthMode("login"));$("#authTabSignup").addEventListener("click",()=>setCloudAuthMode("signup"));$("#cloudAuthSubmit").addEventListener("click",submitCloudAuth);$("#cloudPassword").addEventListener("keydown",e=>{if(e.key==="Enter")submitCloudAuth()});$("#cloudPasswordConfirm").addEventListener("keydown",e=>{if(e.key==="Enter")submitCloudAuth()});$("#setCloudPassword").addEventListener("click",setCurrentCloudPassword);$("#pullCloud").addEventListener("click",()=>pullCloud({force:true}));$("#pushCloud").addEventListener("click",()=>pushCloud());$("#cloudSignOut").addEventListener("click",signOutCloud);$("#downloadDeploy").addEventListener("click",downloadDeployHtml);
+    $("#exportCsv").addEventListener("click",exportCharacterCsv);$("#importCsv").addEventListener("click",()=>$("#csvFileInput").click());$("#csvFileInput").addEventListener("change",async e=>{const f=e.target.files?.[0];try{await importCharacterCsv(f)}catch(err){console.warn(err);toast("CSV 가져오기 실패: "+(err.message||err))}finally{e.target.value=""}});$("#saveCloudConfig").addEventListener("click",saveCloudConfig);$("#authTabLogin").addEventListener("click",()=>setCloudAuthMode("login"));$("#authTabSignup").addEventListener("click",()=>setCloudAuthMode("signup"));$("#cloudAuthSubmit").addEventListener("click",submitCloudAuth);$("#cloudPassword").addEventListener("keydown",e=>{if(e.key==="Enter")submitCloudAuth()});$("#cloudPasswordConfirm").addEventListener("keydown",e=>{if(e.key==="Enter")submitCloudAuth()});$("#setCloudPassword").addEventListener("click",setCurrentCloudPassword);$("#pullCloud").addEventListener("click",()=>pullCloud({force:true}));$("#pushCloud").addEventListener("click",()=>pushCloud());$("#cloudSignOut").addEventListener("click",signOutCloud);$("#downloadDeploy").addEventListener("click",downloadDeployHtml);
     document.addEventListener("visibilitychange",()=>{if(!document.hidden&&cloudUser)pullCloud({silent:true})});
     window.addEventListener("popstate",applyRouteFromLocation);
     if(!location.hash||location.hash==="#")history.replaceState({view:"home"},"","#home");
