@@ -150,11 +150,38 @@
     const searchKey=v=>String(v||"").normalize("NFKC").toLocaleLowerCase("ko").replace(/[\s·&:「」'"._-]/g,"");
     const splitLines=v=>String(v||"").split(/\n/).map(x=>x.trim()).filter(Boolean);
     const safeUrl=v=>{try{const u=new URL(String(v||""));return ["http:","https:"].includes(u.protocol)?u.href:""}catch{return ""}};
-    // ZZZ Wiki 이미지를 최우선으로 사용한다. Special:Redirect/file은 Fandom의
-    // static.wikia.nocookie.net 원본 파일로 연결되므로 파일 해시 경로를 직접 관리할 필요가 없다.
-    const wikiFileUrl=f=>f?"https://zenless-zone-zero.fandom.com/wiki/Special:Redirect/file/"+encodeURIComponent(f):"";
+    // Wiki 실제 파일명은 공백 대신 언더바를 사용한다.
+    // 예: Agent_Roxy_Ifrita_Pryce_Portrait.png
+    const wikiFileName=f=>String(f||"").trim().replace(/\s+/g,"_");
+    const wikiFileUrl=f=>f?"https://zenless-zone-zero.fandom.com/wiki/Special:Redirect/file/"+encodeURIComponent(wikiFileName(f)):"";
     const officialPortraitUrl=a=>wikiFileUrl(OFFICIAL_PORTRAIT_FILES[a?.id]||"");
     const officialFallbackUrl=a=>wikiFileUrl(OFFICIAL_RECORD_FALLBACKS[a?.id]||"");
+
+    // 신규 캐릭터는 Fandom API에서 Wiki 파일 제목을 조회해
+    // 해시 폴더가 포함된 실제 static.wikia.nocookie.net 1000px 이미지 URL을 얻는다.
+    const WIKIA_API="https://zenless-zone-zero.fandom.com/api.php";
+    const wikiaImageCache=new Map();
+    async function resolveWikiaFile(file){
+      file=wikiFileName(file);if(!file)return "";
+      if(wikiaImageCache.has(file))return wikiaImageCache.get(file);
+      const job=(async()=>{
+        try{
+          const qs=new URLSearchParams({action:"query",format:"json",origin:"*",prop:"imageinfo",iiprop:"url",iiurlwidth:"1000",titles:`File:${file}`});
+          const res=await fetch(`${WIKIA_API}?${qs.toString()}`,{mode:"cors",credentials:"omit"});
+          if(!res.ok)return "";
+          const json=await res.json();
+          const pages=json?.query?.pages||{};
+          for(const page of Object.values(pages)){
+            const info=page?.imageinfo?.[0];
+            const url=safeUrl(info?.thumburl||info?.url||"");
+            if(url)return url;
+          }
+        }catch(e){console.warn("Wiki 이미지 조회 실패:",file,e)}
+        return "";
+      })();
+      wikiaImageCache.set(file,job);
+      return job;
+    }
     const OFFICIAL_PORTRAIT_NAME_HINTS={
       "록시":["Roxy Ifrita Pryce","Roxy"],"roxy":["Roxy Ifrita Pryce","Roxy"],"roxyifritapryce":["Roxy Ifrita Pryce","Roxy"],
       "클라렛":["Claret Flint","Claret"],"클라":["Claret Flint","Claret"],"claret":["Claret Flint","Claret"],"claretflint":["Claret Flint","Claret"]
@@ -185,13 +212,32 @@
       names.slice().forEach(v=>{const first=v.split(/\s+/)[0];if(first&&first!==v)push(first)});
       return names;
     }
-    function officialPortraitUrls(a){
-      const files=[],push=f=>{if(f&&!files.includes(f))files.push(f)};
+    function officialPortraitFiles(a){
+      const files=[],push=f=>{f=wikiFileName(f);if(f&&!files.includes(f))files.push(f)};
       push(OFFICIAL_PORTRAIT_FILES[a?.id]);
-      inferredPortraitNames(a).forEach(name=>push(`Agent ${name} Portrait.png`));
+      inferredPortraitNames(a).forEach(name=>push(`Agent_${String(name).trim().replace(/\s+/g,"_")}_Portrait.png`));
       push(OFFICIAL_RECORD_FALLBACKS[a?.id]);
-      inferredPortraitNames(a).forEach(name=>push(`Agent ${name} Agent Record.png`));
-      return files.map(wikiFileUrl).filter(Boolean);
+      inferredPortraitNames(a).forEach(name=>push(`Agent_${String(name).trim().replace(/\s+/g,"_")}_Agent_Record.png`));
+      return files;
+    }
+    function officialPortraitUrls(a){return officialPortraitFiles(a).map(wikiFileUrl).filter(Boolean)}
+    async function resolveAgentWikiaPortrait(a){
+      for(const file of officialPortraitFiles(a)){
+        const url=await resolveWikiaFile(file);
+        if(url)return url;
+      }
+      return "";
+    }
+    function hydrateWikiaImages(root=document){
+      root.querySelectorAll('img[data-wikia-agent]').forEach(img=>{
+        if(img.dataset.wikiaHydrated==="1")return;
+        img.dataset.wikiaHydrated="1";
+        const a=db.agents.find(x=>String(x.id)===String(img.dataset.wikiaAgent));
+        if(!a||safeUrl(a.image))return;
+        // 기존 내장 캐릭터는 원래 경로를 유지하고, 신규/custom 캐릭터만 API로 실제 static.wikia URL을 해결한다.
+        if(OFFICIAL_PORTRAIT_FILES[a.id]&&!String(a.id).startsWith("custom-"))return;
+        resolveAgentWikiaPortrait(a).then(url=>{if(url&&img.isConnected)img.src=url});
+      });
     }
     function inferredPrydwenSlugs(a){
       const slugs=[],push=v=>{v=String(v||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");if(v&&!slugs.includes(v))slugs.push(v)};
@@ -249,10 +295,10 @@
     applyTheme(localStorage.getItem(THEME_KEY)||((matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light"));
 
     function getFiltered(){const q=searchKey(state.query);return db.agents.filter(a=>{const h=[a.name,a.en,...(a.aliases||[]),a.memo||""].map(searchKey).join("|");return(!q||h.includes(q))&&(!state.attribute||a.attribute===state.attribute)&&(!state.specialty||a.specialty===state.specialty)&&(!state.rank||a.rank===state.rank)&&(!state.ownedOnly||a.owned)}).sort((a,b)=>{if(state.sort==="name")return a.name.localeCompare(b.name,"ko");if(state.sort==="version")return Number(b.version)-Number(a.version)||a.name.localeCompare(b.name,"ko");return Number(b.owned)-Number(a.owned)||Number(b.version)-Number(a.version)||a.name.localeCompare(b.name,"ko")})}
-    function imageMarkup(a,mini=false){const urls=agentImageUrls(a),cls=mini?"mini-portrait":"portrait-panel",fallbackName=monogram(a.name);if(!urls.length)return `<div class="${cls}"><div class="portrait-fallback">${esc(fallbackName)}</div></div>`;const rest=JSON.stringify(urls.slice(1));return `<div class="${cls}">${mini?"":`<span class="version-ribbon">v${esc(a.version||"-")}</span>`}<img src="${esc(urls[0])}" data-fallbacks="${esc(rest)}" data-fallback-name="${esc(fallbackName)}" alt="${esc(a.name)} 프로필" loading="lazy" referrerpolicy="no-referrer" onerror="cycleAgentImage(this)"></div>`}
+    function imageMarkup(a,mini=false){const urls=agentImageUrls(a),cls=mini?"mini-portrait":"portrait-panel",fallbackName=monogram(a.name);if(!urls.length)return `<div class="${cls}"><div class="portrait-fallback">${esc(fallbackName)}</div></div>`;const rest=JSON.stringify(urls.slice(1));return `<div class="${cls}">${mini?"":`<span class="version-ribbon">v${esc(a.version||"-")}</span>`}<img src="${esc(urls[0])}" data-fallbacks="${esc(rest)}" data-fallback-name="${esc(fallbackName)}" data-wikia-agent="${esc(a.id)}" alt="${esc(a.name)} 프로필" loading="lazy" referrerpolicy="no-referrer" onerror="cycleAgentImage(this)"></div>`}
     function renderListInto(node,agents){node.innerHTML=agents.length?agents.map(a=>`<button class="agent-row ${state.view==="agent"&&a.id===state.selectedId?"active":""}" data-id="${esc(a.id)}" type="button">${imageMarkup(a,true)}<span class="row-copy"><b>${esc(a.name)}</b><span>${esc(a.attribute)} · ${esc(a.specialty)} · v${esc(a.version)}</span></span><span class="row-flags"><strong>${esc(a.rank)}</strong><span class="owned-mark ${a.owned?"yes":""}"></span></span></button>`).join(""):`<div class="empty-page">조건에 맞는 캐릭터가 없습니다.</div>`}
     function renderFilterOptions(){const fill=(id,vals,label)=>{const n=$(id),cur=n.value;n.innerHTML=`<option value="">모든 ${label}</option>`+[...new Set(vals.filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ko")).map(v=>`<option>${esc(v)}</option>`).join("");n.value=cur};fill("#attributeFilter",db.agents.map(a=>a.attribute),"속성");fill("#specialtyFilter",db.agents.map(a=>a.specialty),"특성")}
-    function renderAgentList(){const arr=getFiltered();$("#resultCount").textContent=`${arr.length} AGENTS`;renderListInto($("#agentList"),arr);renderListInto($("#mobileAgentList"),arr)}
+    function renderAgentList(){const arr=getFiltered();$("#resultCount").textContent=`${arr.length} AGENTS`;renderListInto($("#agentList"),arr);renderListInto($("#mobileAgentList"),arr);hydrateWikiaImages($("#agentList"));hydrateWikiaImages($("#mobileAgentList"))}
     function engineCard(kicker,title,items){const arr=(items||[]).filter(Boolean);return `<article class="info-card"><span class="card-kicker">${esc(kicker)}</span><h3>${esc(title)}</h3>${arr.length?`<div class="item-list">${arr.map(x=>`<div class="item-pill">${esc(x)}</div>`).join("")}</div>`:`<div class="item-list"></div>`}</article>`}
     function discBlock(label,opts){return `<article class="disc-card"><span class="label">${esc(label)}</span>${(opts||[]).length?(opts||[]).map(o=>`<div class="disc-option"><b>${esc(o.name)} ${esc(o.pieces)}세트</b><span>${esc(o.effect||"효과 설명 미입력")}</span></div>`).join(""):`<div class="disc-option"><b>미입력</b><span>캐릭터 DB 수정에서 추가할 수 있습니다.</span></div>`}</article>`}
     function homeAgentCard(a){return `<button class="home-agent-card" data-home-agent="${esc(a.id)}" type="button">${imageMarkup(a,true)}<span class="home-agent-copy"><b>${esc(a.name)}</b><span>${esc(a.attribute||"-")} · ${esc(a.specialty||"-")}</span><em>v${esc(a.version||"-")}</em></span></button>`}
@@ -268,6 +314,7 @@
         <section class="home-section"><div class="home-section-head"><span class="home-section-no">02</span><h2>최근 버전 캐릭터</h2><p>최신 버전 순으로 빠르게 이동합니다.</p></div><div class="home-agent-grid">${recent.map(homeAgentCard).join("")}</div></section>
         <div class="home-footer-note"><span>●</span><span><b>사이트 화면을 수정해도 Supabase의 개인 데이터는 별도로 유지됩니다.</b> GitHub에는 아카이브 프로그램을, Supabase에는 개인 육성 데이터를 저장하는 구조입니다.</span></div>
       </div>`;
+      hydrateWikiaImages($("#detailRoot"));
       $("#homeBrowse")?.addEventListener("click",()=>{if(matchMedia("(max-width:820px)").matches){$("#mobileSearch").value=state.query;$("#listDialog").showModal()}else{$("#searchInput").focus();$("#searchInput").scrollIntoView({behavior:"smooth",block:"center"})}});
       $("#homeOwned")?.addEventListener("click",()=>{state.ownedOnly=true;$("#ownedOnly").checked=true;renderAgentList();if(matchMedia("(max-width:820px)").matches){$("#mobileSearch").value=state.query;$("#listDialog").showModal()}else $("#searchInput").focus()});
       $("#homeAdd")?.addEventListener("click",()=>openEditor());
@@ -280,6 +327,7 @@
       <section class="section"><div class="section-head"><span class="section-no">02</span><h2>디스크</h2><p>세트 효과와 주옵션을 한눈에</p></div><div class="disc-grid">${discBlock("추천 4세트",a.disc4Options)}${discBlock("추천 2세트",a.disc2Options)}</div><div class="slot-grid"><div class="slot-card"><strong>4</strong><span>${esc(a.slot4||"미입력")}</span></div><div class="slot-card"><strong>5</strong><span>${esc(a.slot5||"미입력")}</span></div><div class="slot-card"><strong>6</strong><span>${esc(a.slot6||"미입력")}</span></div></div><div class="priority-grid"><div class="priority-box" style="grid-column:1/-1"><b>부옵션 우선순위</b><p>${esc(a.substats||"미입력")}</p></div></div></section>
       <section class="section"><div class="section-head"><span class="section-no">03</span><h2>현재 스펙</h2><p>필수·권고 수치와 비교</p></div>${stats?`<div class="stat-shell"><div class="stat-head"><div>수치</div><div>필수</div><div>권고</div><div>현재</div><div>상태</div></div>${stats}</div>`:`<div class="info-card">등록된 스펙 기준이 없습니다.</div>`}${a.note?`<div class="note-box">${esc(a.note)}</div>`:""}</section>
       <section class="section"><div class="section-head"><span class="section-no">04</span><h2>개인 메모</h2><p>자동 저장 · Supabase 연결 시 기기 간 동기화</p></div><textarea class="memo" id="memoInput" placeholder="육성 계획, 파티 조합, 교체할 디스크 등을 적어두세요.">${esc(a.memo||"")}</textarea>${a.source?`<div class="source-line">참고 출처: <a href="${esc(a.source)}" target="_blank" rel="noopener noreferrer">빌드 가이드 열기</a></div>`:""}</section>`;
+      hydrateWikiaImages($("#detailRoot"));
       bindDetailEvents()}
     function bindDetailEvents(){const a=selectedAgent();$("#ownedToggle")?.addEventListener("change",e=>{a.owned=e.target.checked;saveLocal();renderAgentList()});$("#mindscapeSelect")?.addEventListener("change",e=>{a.mindscape=Number(e.target.value);saveLocal()});$("#engineCopiesSelect")?.addEventListener("change",e=>{a.engineCopies=Number(e.target.value);saveLocal()});$("#editSelected")?.addEventListener("click",()=>openEditor(a));$("#memoInput")?.addEventListener("input",e=>{a.memo=e.target.value;saveLocal()});$$('.current-input').forEach(inp=>inp.addEventListener('input',e=>{a.current=a.current||{};a.current[e.target.dataset.stat]=e.target.value;saveLocal();const row=e.target.closest('.stat-row'),cut=a.cuts.find(c=>c.stat===e.target.dataset.stat),g=grade(cut,e.target.value),node=row.querySelector('.grade');node.className='grade '+g[0];node.textContent=g[1]}))}
     function render(){renderAgentList();state.view==="home"?renderHome():renderDetail()}
