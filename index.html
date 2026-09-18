@@ -150,6 +150,8 @@
     const searchKey=v=>String(v||"").normalize("NFKC").toLocaleLowerCase("ko").replace(/[\s·&:「」'"._-]/g,"");
     const splitLines=v=>String(v||"").split(/\n/).map(x=>x.trim()).filter(Boolean);
     const safeUrl=v=>{try{const u=new URL(String(v||""));return ["http:","https:"].includes(u.protocol)?u.href:""}catch{return ""}};
+    // ZZZ Wiki 이미지를 최우선으로 사용한다. Special:Redirect/file은 Fandom의
+    // static.wikia.nocookie.net 원본 파일로 연결되므로 파일 해시 경로를 직접 관리할 필요가 없다.
     const wikiFileUrl=f=>f?"https://zenless-zone-zero.fandom.com/wiki/Special:Redirect/file/"+encodeURIComponent(f):"";
     const officialPortraitUrl=a=>wikiFileUrl(OFFICIAL_PORTRAIT_FILES[a?.id]||"");
     const officialFallbackUrl=a=>wikiFileUrl(OFFICIAL_RECORD_FALLBACKS[a?.id]||"");
@@ -157,6 +159,22 @@
       "록시":["Roxy Ifrita Pryce","Roxy"],"roxy":["Roxy Ifrita Pryce","Roxy"],"roxyifritapryce":["Roxy Ifrita Pryce","Roxy"],
       "클라렛":["Claret Flint","Claret"],"클라":["Claret Flint","Claret"],"claret":["Claret Flint","Claret"],"claretflint":["Claret Flint","Claret"]
     };
+    // 신규 캐릭터 중 확인된 Wiki 고해상도 Portrait 직링크.
+    // 직링크가 없어도 아래의 파일명 자동 추론이 Wiki 원본을 먼저 찾는다.
+    const WIKIA_HQ_PORTRAITS={
+      "roxyifritapryce":"https://static.wikia.nocookie.net/zenless-zone-zero/images/e/e8/Agent_Roxy_Ifrita_Pryce_Portrait.png/revision/latest/scale-to-width-down/1000?cb=20260910144945",
+      "roxy":"https://static.wikia.nocookie.net/zenless-zone-zero/images/e/e8/Agent_Roxy_Ifrita_Pryce_Portrait.png/revision/latest/scale-to-width-down/1000?cb=20260910144945",
+      "록시":"https://static.wikia.nocookie.net/zenless-zone-zero/images/e/e8/Agent_Roxy_Ifrita_Pryce_Portrait.png/revision/latest/scale-to-width-down/1000?cb=20260910144945",
+      "claretflint":"https://static.wikia.nocookie.net/zenless-zone-zero/images/7/7c/Agent_Claret_Flint_Portrait.png/revision/latest/scale-to-width-down/1000?cb=20260909031926",
+      "claret":"https://static.wikia.nocookie.net/zenless-zone-zero/images/7/7c/Agent_Claret_Flint_Portrait.png/revision/latest/scale-to-width-down/1000?cb=20260909031926",
+      "클라렛":"https://static.wikia.nocookie.net/zenless-zone-zero/images/7/7c/Agent_Claret_Flint_Portrait.png/revision/latest/scale-to-width-down/1000?cb=20260909031926",
+      "클라":"https://static.wikia.nocookie.net/zenless-zone-zero/images/7/7c/Agent_Claret_Flint_Portrait.png/revision/latest/scale-to-width-down/1000?cb=20260909031926"
+    };
+    function knownWikiahqPortrait(a){
+      const keys=[a?.name,a?.en,...(Array.isArray(a?.aliases)?a.aliases:[])].map(searchKey);
+      for(const key of keys)if(WIKIA_HQ_PORTRAITS[key])return WIKIA_HQ_PORTRAITS[key];
+      return "";
+    }
     function inferredPortraitNames(a){
       const names=[],push=v=>{v=String(v||"").trim();if(v&&!names.includes(v))names.push(v)};
       [a?.name,a?.en,...(Array.isArray(a?.aliases)?a.aliases:[])].forEach(v=>{
@@ -185,10 +203,15 @@
     const prydwenCardUrl=slug=>slug?`https://cdn.prydwen.gg/images/zenless-zone-zero/characters/${encodeURIComponent(slug)}_card.webp`:"";
     function agentImageUrls(a){
       const urls=[],push=u=>{u=safeUrl(u);if(u&&!urls.includes(u))urls.push(u)};
+      // 1) 사용자가 직접 지정한 URL
+      // 2) 확인된 static.wikia 고해상도 Portrait
+      // 3) ZZZ Wiki Portrait 자동 추론 (최종적으로 static.wikia 원본으로 리다이렉트)
+      // 4) Agent Record 이미지
+      // 5) 마지막 예비 경로로만 Prydwen 카드 이미지
       push(a?.image);
-      push(officialPortraitUrl(a));
-      inferredPrydwenSlugs(a).forEach(slug=>push(prydwenCardUrl(slug)));
+      push(knownWikiahqPortrait(a));
       officialPortraitUrls(a).forEach(push);
+      inferredPrydwenSlugs(a).forEach(slug=>push(prydwenCardUrl(slug)));
       return urls;
     }
     function cycleAgentImage(img){
